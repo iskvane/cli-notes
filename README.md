@@ -28,6 +28,9 @@ cargo run -- show 1
 # Search notes
 cargo run -- search Docker
 
+# Change the title of a note
+cargo run -- edit-title 1 "New title"
+
 # Delete a note
 cargo run -- delete 1
 ```
