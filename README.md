@@ -30,6 +30,9 @@ cn show 1
 # Search notes
 cn search Docker
 
+# Replace the content of a note
+cargo run -- edit 1 "New note content"
+
 # Delete a note
 cn delete 1
 ```
