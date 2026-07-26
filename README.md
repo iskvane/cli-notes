@@ -28,6 +28,9 @@ cargo run -- show 1
 # Search notes
 cargo run -- search Docker
 
+# Replace the content of a note
+cargo run -- edit 1 "New note content"
+
 # Delete a note
 cargo run -- delete 1
 ```
