@@ -34,6 +34,15 @@ enum Commands {
         query: String,
     },
 
+    /// Inhalt einer Notiz ersetzen
+    Edit {
+        id: i64,
+
+        /// Neuer Inhalt der Notiz
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
+    },
+
     /// Notiz löschen
     Delete {
         id: i64,
@@ -167,6 +176,21 @@ fn main() -> Result<()> {
             for note in notes {
                 let (id, title, created_at) = note?;
                 println!("{id:>4}  {created_at}  {title}");
+            }
+        }
+
+        Commands::Edit { id, message } => {
+            let body = message.join(" ");
+
+            let count = conn.execute(
+                "UPDATE notes SET body = ?2 WHERE id = ?1",
+                params![id, body],
+            )?;
+
+            if count == 0 {
+                eprintln!("Keine Notiz mit ID {id} gefunden.");
+            } else {
+                println!("Notiz {id} aktualisiert.");
             }
         }
 
