@@ -13,20 +13,25 @@ Notes are stored in a SQLite database.
 cargo run -- --help
 ```
 
+Once installed, the application is called as `cn`.
+
 ## Commands
 
 ```bash
 # Create a note
-cargo run -- add "Title" --body "Note content"
+cn add "Title" --body "Note content"
 
 # List all notes
-cargo run -- list
+cn list
 
 # Show a note
-cargo run -- show 1
+cn show 1
 
 # Search notes
-cargo run -- search Docker
+cn search Docker
+
+# Replace the content of a note
+cargo run -- edit 1 "New note content"
 
 # Replace the content of a note
 cargo run -- edit 1 "New note content"
@@ -35,7 +40,7 @@ cargo run -- edit 1 "New note content"
 cargo run -- edit 1
 
 # Delete a note
-cargo run -- delete 1
+cn delete 1
 ```
 
 ## Editor

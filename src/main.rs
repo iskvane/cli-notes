@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Parser)]
-#[command(name = "notes", version, about = "Eine kleine lokale Notes-CLI")]
+#[command(name = "cn", version, about = "Eine kleine lokale Notes-CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -40,7 +40,7 @@ enum Commands {
         id: i64,
 
         /// Neuer Inhalt der Notiz
-        #[arg(num_args = 1..)]
+        #[arg(required = true, num_args = 1..)]
         message: Vec<String>,
     },
 
