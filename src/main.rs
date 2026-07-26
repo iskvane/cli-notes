@@ -1,25 +1,37 @@
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Parser)]
-#[command(name = "cn", version, about = "Eine kleine lokale Notes-CLI")]
+#[command(
+    name = "cn",
+    version,
+    about = "Eine kleine lokale Notes-CLI",
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    /// Inhalt einer neuen Notiz (implizites "add")
+    #[arg(trailing_var_arg = true)]
+    message: Vec<String>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Neue Notiz erstellen
     Add {
-        title: String,
+        /// Inhalt der Notiz
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
 
+        /// Titel der Notiz (Standard: erste Zeile des Inhalts)
         #[arg(short, long)]
-        body: String,
+        title: Option<String>,
     },
 
     /// Alle Notizen auflisten
@@ -40,14 +52,39 @@ enum Commands {
         id: i64,
 
         /// Neuer Inhalt der Notiz
-        #[arg(required = true, num_args = 1..)]
+        #[arg(num_args = 1..)]
         message: Vec<String>,
+    },
+
+    /// Titel einer Notiz ändern
+    EditTitle {
+        id: i64,
+
+        /// Neuer Titel der Notiz
+        #[arg(required = true, num_args = 1..)]
+        title: Vec<String>,
     },
 
     /// Notiz löschen
     Delete {
         id: i64,
     },
+}
+
+/// Maximale Länge eines automatisch abgeleiteten Titels.
+const TITLE_MAX_LEN: usize = 50;
+
+/// Leitet einen Titel aus der ersten Zeile des Inhalts ab.
+fn derive_title(body: &str) -> String {
+    let first_line = body.lines().next().unwrap_or("").trim();
+
+    if first_line.chars().count() <= TITLE_MAX_LEN {
+        return first_line.to_string();
+    }
+
+    let truncated: String = first_line.chars().take(TITLE_MAX_LEN - 1).collect();
+
+    format!("{}…", truncated.trim_end())
 }
 
 /// Liefert den konfigurierten Editor aus $VISUAL bzw. $EDITOR.
@@ -135,12 +172,28 @@ fn init_db(conn: &Connection) -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Ohne Subcommand zählt ein freier Text als "add", alles andere zeigt die Hilfe.
+    let command = match cli.command {
+        Some(command) => command,
+        None if !cli.message.is_empty() => Commands::Add {
+            message: cli.message,
+            title: None,
+        },
+        None => {
+            Cli::command().print_help()?;
+            return Ok(());
+        }
+    };
+
     let db_path = database_path()?;
     let conn = Connection::open(db_path)?;
     init_db(&conn)?;
 
-    match cli.command {
-        Commands::Add { title, body } => {
+    match command {
+        Commands::Add { message, title } => {
+            let body = message.join(" ");
+            let title = title.unwrap_or_else(|| derive_title(&body));
+
             conn.execute(
                 "INSERT INTO notes (title, body) VALUES (?1, ?2)",
                 params![title, body],
@@ -264,6 +317,21 @@ fn main() -> Result<()> {
             }
         }
 
+        Commands::EditTitle { id, title } => {
+            let title = title.join(" ");
+
+            let count = conn.execute(
+                "UPDATE notes SET title = ?2 WHERE id = ?1",
+                params![id, title],
+            )?;
+
+            if count == 0 {
+                eprintln!("Keine Notiz mit ID {id} gefunden.");
+            } else {
+                println!("Titel von Notiz {id} aktualisiert.");
+            }
+        }
+
         Commands::Delete { id } => {
             let count = conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
 
@@ -276,4 +344,39 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_title_uses_the_first_line() {
+        assert_eq!(derive_title("Einkaufen\nMilch\nEier"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_trims_whitespace() {
+        assert_eq!(derive_title("  Einkaufen  \nMilch"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_truncates_long_lines() {
+        let title = derive_title(&"a".repeat(TITLE_MAX_LEN + 10));
+
+        assert_eq!(title.chars().count(), TITLE_MAX_LEN);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn derive_title_keeps_lines_at_the_limit_intact() {
+        let body = "a".repeat(TITLE_MAX_LEN);
+
+        assert_eq!(derive_title(&body), body);
+    }
+
+    #[test]
+    fn derive_title_handles_an_empty_body() {
+        assert_eq!(derive_title(""), "");
+    }
 }

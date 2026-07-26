@@ -18,8 +18,14 @@ Once installed, the application is called as `cn`.
 ## Commands
 
 ```bash
-# Create a note
-cn add "Title" --body "Note content"
+# Create a note (the title is derived from the first line)
+cn add "Note content"
+
+# Create a note with an explicit title
+cn add "Note content" --title "Title"
+
+# `add` is implied when no subcommand is given
+cn "Note content"
 
 # List all notes
 cn list
@@ -31,13 +37,13 @@ cn show 1
 cn search Docker
 
 # Replace the content of a note
-cargo run -- edit 1 "New note content"
-
-# Replace the content of a note
-cargo run -- edit 1 "New note content"
+cn edit 1 "New note content"
 
 # Edit a note in your editor (saved when the editor is closed)
-cargo run -- edit 1
+cn edit 1
+
+# Change the title of a note
+cn edit-title 1 "New title"
 
 # Delete a note
 cn delete 1
