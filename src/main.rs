@@ -40,7 +40,7 @@ enum Commands {
         id: i64,
 
         /// Neuer Inhalt der Notiz
-        #[arg(required = true, num_args = 1..)]
+        #[arg(num_args = 1..)]
         message: Vec<String>,
     },
 

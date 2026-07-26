@@ -31,13 +31,10 @@ cn show 1
 cn search Docker
 
 # Replace the content of a note
-cargo run -- edit 1 "New note content"
-
-# Replace the content of a note
-cargo run -- edit 1 "New note content"
+cn edit 1 "New note content"
 
 # Edit a note in your editor (saved when the editor is closed)
-cargo run -- edit 1
+cn edit 1
 
 # Delete a note
 cn delete 1
