@@ -15,10 +15,13 @@ struct Cli {
 enum Commands {
     /// Neue Notiz erstellen
     Add {
-        title: String,
+        /// Inhalt der Notiz
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
 
+        /// Titel der Notiz (Standard: erste Zeile des Inhalts)
         #[arg(short, long)]
-        body: String,
+        title: Option<String>,
     },
 
     /// Alle Notizen auflisten
@@ -38,6 +41,22 @@ enum Commands {
     Delete {
         id: i64,
     },
+}
+
+/// Maximale Länge eines automatisch abgeleiteten Titels.
+const TITLE_MAX_LEN: usize = 50;
+
+/// Leitet einen Titel aus der ersten Zeile des Inhalts ab.
+fn derive_title(body: &str) -> String {
+    let first_line = body.lines().next().unwrap_or("").trim();
+
+    if first_line.chars().count() <= TITLE_MAX_LEN {
+        return first_line.to_string();
+    }
+
+    let truncated: String = first_line.chars().take(TITLE_MAX_LEN - 1).collect();
+
+    format!("{}…", truncated.trim_end())
 }
 
 fn database_path() -> Result<PathBuf> {
@@ -83,7 +102,10 @@ fn main() -> Result<()> {
     init_db(&conn)?;
 
     match cli.command {
-        Commands::Add { title, body } => {
+        Commands::Add { message, title } => {
+            let body = message.join(" ");
+            let title = title.unwrap_or_else(|| derive_title(&body));
+
             conn.execute(
                 "INSERT INTO notes (title, body) VALUES (?1, ?2)",
                 params![title, body],
@@ -182,4 +204,39 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_title_uses_the_first_line() {
+        assert_eq!(derive_title("Einkaufen\nMilch\nEier"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_trims_whitespace() {
+        assert_eq!(derive_title("  Einkaufen  \nMilch"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_truncates_long_lines() {
+        let title = derive_title(&"a".repeat(TITLE_MAX_LEN + 10));
+
+        assert_eq!(title.chars().count(), TITLE_MAX_LEN);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn derive_title_keeps_lines_at_the_limit_intact() {
+        let body = "a".repeat(TITLE_MAX_LEN);
+
+        assert_eq!(derive_title(&body), body);
+    }
+
+    #[test]
+    fn derive_title_handles_an_empty_body() {
+        assert_eq!(derive_title(""), "");
+    }
 }

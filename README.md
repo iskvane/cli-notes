@@ -16,8 +16,11 @@ cargo run -- --help
 ## Commands
 
 ```bash
-# Create a note
-cargo run -- add "Title" --body "Note content"
+# Create a note (the title is derived from the first line)
+cargo run -- add "Note content"
+
+# Create a note with an explicit title
+cargo run -- add "Note content" --title "Title"
 
 # List all notes
 cargo run -- list
