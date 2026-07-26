@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  BIN_NAME: cn
+
+jobs:
+  # ---------------------------------------------------------
+  # WINDOWS: use cargo-wix to build .msi installer
+  # ---------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install WiX Toolset
+        run: choco install wixtoolset -y
+
+      - name: Add WiX to PATH
+        run: echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Build MSI installer
+        run: cargo wix --nocapture
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: target/wix/*.msi
+
+  # ---------------------------------------------------------
+  # LINUX: use cargo-deb to build .deb package
+  # ---------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build .deb package
+        run: cargo deb
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: target/debian/*.deb
+
+  # ---------------------------------------------------------
+  # MACOS: use cargo-bundle to build .app bundle and .dmg
+  # ---------------------------------------------------------
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+
+      - name: Build .app bundle
+        run: cargo bundle --release
+
+      - name: Create .dmg from .app
+        run: |
+          APP_PATH=$(find target/release/bundle/osx -name "*.app" | head -n 1)
+          hdiutil create -volname "${{ env.BIN_NAME }}" -srcfolder "$APP_PATH" -ov -format UDZO "${{ env.BIN_NAME }}.dmg"
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: "*.dmg"
+
+  # ---------------------------------------------------------
+  # RELEASE: collect all artifacts and create a GitHub Release
+  # ---------------------------------------------------------
+  release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows-msi/*.msi
+            artifacts/linux-deb/*.deb
+            artifacts/macos-dmg/*.dmg
