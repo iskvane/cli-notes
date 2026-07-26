@@ -33,9 +33,22 @@ cn search Docker
 # Replace the content of a note
 cargo run -- edit 1 "New note content"
 
+# Replace the content of a note
+cargo run -- edit 1 "New note content"
+
+# Edit a note in your editor (saved when the editor is closed)
+cargo run -- edit 1
+
 # Delete a note
 cn delete 1
 ```
+
+## Editor
+
+`edit <id>` without a message opens the note in the editor from `$VISUAL`,
+falling back to `$EDITOR`. If neither is set, `notepad` is used on Windows and
+`vi` elsewhere. The note is saved when the editor exits; a non-zero exit status
+leaves the note untouched.
 
 ## Storage
 

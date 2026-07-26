@@ -1,8 +1,9 @@
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "cn", version, about = "Eine kleine lokale Notes-CLI")]
@@ -34,7 +35,7 @@ enum Commands {
         query: String,
     },
 
-    /// Inhalt einer Notiz ersetzen
+    /// Inhalt einer Notiz ersetzen; ohne Nachricht öffnet der konfigurierte Editor
     Edit {
         id: i64,
 
@@ -47,6 +48,53 @@ enum Commands {
     Delete {
         id: i64,
     },
+}
+
+/// Liefert den konfigurierten Editor aus $VISUAL bzw. $EDITOR.
+fn configured_editor() -> String {
+    for key in ["VISUAL", "EDITOR"] {
+        if let Ok(editor) = std::env::var(key) {
+            if !editor.trim().is_empty() {
+                return editor;
+            }
+        }
+    }
+
+    if cfg!(windows) {
+        "notepad".to_string()
+    } else {
+        "vi".to_string()
+    }
+}
+
+/// Öffnet den Text im konfigurierten Editor und gibt den gespeicherten Stand zurück.
+fn edit_in_editor(initial: &str) -> Result<String> {
+    let editor = configured_editor();
+
+    let mut parts = editor.split_whitespace();
+    let program = parts
+        .next()
+        .context("Der konfigurierte Editor ist leer.")?;
+
+    let path = std::env::temp_dir().join(format!("notes-{}.txt", std::process::id()));
+    fs::write(&path, initial)?;
+
+    let status = Command::new(program)
+        .args(parts)
+        .arg(&path)
+        .status()
+        .with_context(|| format!("Editor \"{editor}\" konnte nicht gestartet werden."))?;
+
+    if !status.success() {
+        let _ = fs::remove_file(&path);
+        bail!("Editor \"{editor}\" wurde mit einem Fehler beendet. Notiz bleibt unverändert.");
+    }
+
+    let edited = fs::read_to_string(&path)?;
+    let _ = fs::remove_file(&path);
+
+    // Editoren hängen beim Speichern gerne einen Zeilenumbruch an.
+    Ok(edited.trim_end_matches(['\r', '\n']).to_string())
 }
 
 fn database_path() -> Result<PathBuf> {
@@ -180,7 +228,29 @@ fn main() -> Result<()> {
         }
 
         Commands::Edit { id, message } => {
-            let body = message.join(" ");
+            let body = if message.is_empty() {
+                let current: Option<String> = conn
+                    .query_row("SELECT body FROM notes WHERE id = ?1", params![id], |row| {
+                        row.get(0)
+                    })
+                    .optional()?;
+
+                let Some(current) = current else {
+                    eprintln!("Keine Notiz mit ID {id} gefunden.");
+                    return Ok(());
+                };
+
+                let edited = edit_in_editor(&current)?;
+
+                if edited == current {
+                    println!("Notiz {id} unverändert.");
+                    return Ok(());
+                }
+
+                edited
+            } else {
+                message.join(" ")
+            };
 
             let count = conn.execute(
                 "UPDATE notes SET body = ?2 WHERE id = ?1",
