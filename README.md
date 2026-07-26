@@ -13,27 +13,48 @@ Notes are stored in a SQLite database.
 cargo run -- --help
 ```
 
+Once installed, the application is called as `cn`.
+
 ## Commands
 
 ```bash
-# Create a note
-cargo run -- add "Title" --body "Note content"
+# Create a note (the title is derived from the first line)
+cn add "Note content"
+
+# Create a note with an explicit title
+cn add "Note content" --title "Title"
+
+# `add` is implied when no subcommand is given
+cn "Note content"
 
 # List all notes
-cargo run -- list
+cn list
 
 # Show a note
-cargo run -- show 1
+cn show 1
 
 # Search notes
-cargo run -- search Docker
+cn search Docker
+
+# Replace the content of a note
+cn edit 1 "New note content"
+
+# Edit a note in your editor (saved when the editor is closed)
+cn edit 1
 
 # Change the title of a note
-cargo run -- edit-title 1 "New title"
+cn edit-title 1 "New title"
 
 # Delete a note
-cargo run -- delete 1
+cn delete 1
 ```
+
+## Editor
+
+`edit <id>` without a message opens the note in the editor from `$VISUAL`,
+falling back to `$EDITOR`. If neither is set, `notepad` is used on Windows and
+`vi` elsewhere. The note is saved when the editor exits; a non-zero exit status
+leaves the note untouched.
 
 ## Storage
 

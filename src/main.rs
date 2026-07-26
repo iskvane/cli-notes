@@ -1,24 +1,37 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use rusqlite::{params, Connection};
+use anyhow::{bail, Context, Result};
+use clap::{CommandFactory, Parser, Subcommand};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Parser)]
-#[command(name = "notes", version, about = "Eine kleine lokale Notes-CLI")]
+#[command(
+    name = "cn",
+    version,
+    about = "Eine kleine lokale Notes-CLI",
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    /// Inhalt einer neuen Notiz (implizites "add")
+    #[arg(trailing_var_arg = true)]
+    message: Vec<String>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Neue Notiz erstellen
     Add {
-        title: String,
+        /// Inhalt der Notiz
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
 
+        /// Titel der Notiz (Standard: erste Zeile des Inhalts)
         #[arg(short, long)]
-        body: String,
+        title: Option<String>,
     },
 
     /// Alle Notizen auflisten
@@ -34,6 +47,15 @@ enum Commands {
         query: String,
     },
 
+    /// Inhalt einer Notiz ersetzen; ohne Nachricht öffnet der konfigurierte Editor
+    Edit {
+        id: i64,
+
+        /// Neuer Inhalt der Notiz
+        #[arg(num_args = 1..)]
+        message: Vec<String>,
+    },
+
     /// Titel einer Notiz ändern
     EditTitle {
         id: i64,
@@ -47,6 +69,69 @@ enum Commands {
     Delete {
         id: i64,
     },
+}
+
+/// Maximale Länge eines automatisch abgeleiteten Titels.
+const TITLE_MAX_LEN: usize = 50;
+
+/// Leitet einen Titel aus der ersten Zeile des Inhalts ab.
+fn derive_title(body: &str) -> String {
+    let first_line = body.lines().next().unwrap_or("").trim();
+
+    if first_line.chars().count() <= TITLE_MAX_LEN {
+        return first_line.to_string();
+    }
+
+    let truncated: String = first_line.chars().take(TITLE_MAX_LEN - 1).collect();
+
+    format!("{}…", truncated.trim_end())
+}
+
+/// Liefert den konfigurierten Editor aus $VISUAL bzw. $EDITOR.
+fn configured_editor() -> String {
+    for key in ["VISUAL", "EDITOR"] {
+        if let Ok(editor) = std::env::var(key) {
+            if !editor.trim().is_empty() {
+                return editor;
+            }
+        }
+    }
+
+    if cfg!(windows) {
+        "notepad".to_string()
+    } else {
+        "vi".to_string()
+    }
+}
+
+/// Öffnet den Text im konfigurierten Editor und gibt den gespeicherten Stand zurück.
+fn edit_in_editor(initial: &str) -> Result<String> {
+    let editor = configured_editor();
+
+    let mut parts = editor.split_whitespace();
+    let program = parts
+        .next()
+        .context("Der konfigurierte Editor ist leer.")?;
+
+    let path = std::env::temp_dir().join(format!("notes-{}.txt", std::process::id()));
+    fs::write(&path, initial)?;
+
+    let status = Command::new(program)
+        .args(parts)
+        .arg(&path)
+        .status()
+        .with_context(|| format!("Editor \"{editor}\" konnte nicht gestartet werden."))?;
+
+    if !status.success() {
+        let _ = fs::remove_file(&path);
+        bail!("Editor \"{editor}\" wurde mit einem Fehler beendet. Notiz bleibt unverändert.");
+    }
+
+    let edited = fs::read_to_string(&path)?;
+    let _ = fs::remove_file(&path);
+
+    // Editoren hängen beim Speichern gerne einen Zeilenumbruch an.
+    Ok(edited.trim_end_matches(['\r', '\n']).to_string())
 }
 
 fn database_path() -> Result<PathBuf> {
@@ -87,12 +172,28 @@ fn init_db(conn: &Connection) -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Ohne Subcommand zählt ein freier Text als "add", alles andere zeigt die Hilfe.
+    let command = match cli.command {
+        Some(command) => command,
+        None if !cli.message.is_empty() => Commands::Add {
+            message: cli.message,
+            title: None,
+        },
+        None => {
+            Cli::command().print_help()?;
+            return Ok(());
+        }
+    };
+
     let db_path = database_path()?;
     let conn = Connection::open(db_path)?;
     init_db(&conn)?;
 
-    match cli.command {
-        Commands::Add { title, body } => {
+    match command {
+        Commands::Add { message, title } => {
+            let body = message.join(" ");
+            let title = title.unwrap_or_else(|| derive_title(&body));
+
             conn.execute(
                 "INSERT INTO notes (title, body) VALUES (?1, ?2)",
                 params![title, body],
@@ -179,6 +280,43 @@ fn main() -> Result<()> {
             }
         }
 
+        Commands::Edit { id, message } => {
+            let body = if message.is_empty() {
+                let current: Option<String> = conn
+                    .query_row("SELECT body FROM notes WHERE id = ?1", params![id], |row| {
+                        row.get(0)
+                    })
+                    .optional()?;
+
+                let Some(current) = current else {
+                    eprintln!("Keine Notiz mit ID {id} gefunden.");
+                    return Ok(());
+                };
+
+                let edited = edit_in_editor(&current)?;
+
+                if edited == current {
+                    println!("Notiz {id} unverändert.");
+                    return Ok(());
+                }
+
+                edited
+            } else {
+                message.join(" ")
+            };
+
+            let count = conn.execute(
+                "UPDATE notes SET body = ?2 WHERE id = ?1",
+                params![id, body],
+            )?;
+
+            if count == 0 {
+                eprintln!("Keine Notiz mit ID {id} gefunden.");
+            } else {
+                println!("Notiz {id} aktualisiert.");
+            }
+        }
+
         Commands::EditTitle { id, title } => {
             let title = title.join(" ");
 
@@ -206,4 +344,39 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_title_uses_the_first_line() {
+        assert_eq!(derive_title("Einkaufen\nMilch\nEier"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_trims_whitespace() {
+        assert_eq!(derive_title("  Einkaufen  \nMilch"), "Einkaufen");
+    }
+
+    #[test]
+    fn derive_title_truncates_long_lines() {
+        let title = derive_title(&"a".repeat(TITLE_MAX_LEN + 10));
+
+        assert_eq!(title.chars().count(), TITLE_MAX_LEN);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn derive_title_keeps_lines_at_the_limit_intact() {
+        let body = "a".repeat(TITLE_MAX_LEN);
+
+        assert_eq!(derive_title(&body), body);
+    }
+
+    #[test]
+    fn derive_title_handles_an_empty_body() {
+        assert_eq!(derive_title(""), "");
+    }
 }

@@ -2,6 +2,14 @@
 name = "cli-notes"
 version = "0.1.0"
 edition = "2024"
+authors = ["Iskander Vane <iskander@ivane.dev>"]
+license = "MIT"
+description = "A simple CLI tool for managing notes"
+homepage = "https://github.com/ivane/cli-notes"
+
+[[bin]]
+name = "cn"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
