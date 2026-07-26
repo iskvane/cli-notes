@@ -22,6 +22,9 @@ cargo run -- add "Note content"
 # Create a note with an explicit title
 cargo run -- add "Note content" --title "Title"
 
+# `add` is implied when no subcommand is given
+cargo run -- "Note content"
+
 # List all notes
 cargo run -- list
 

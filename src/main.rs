@@ -1,14 +1,23 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use rusqlite::{params, Connection};
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "notes", version, about = "Eine kleine lokale Notes-CLI")]
+#[command(
+    name = "notes",
+    version,
+    about = "Eine kleine lokale Notes-CLI",
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    /// Inhalt einer neuen Notiz (implizites "add")
+    #[arg(trailing_var_arg = true)]
+    message: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -97,11 +106,24 @@ fn init_db(conn: &Connection) -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Ohne Subcommand zählt ein freier Text als "add", alles andere zeigt die Hilfe.
+    let command = match cli.command {
+        Some(command) => command,
+        None if !cli.message.is_empty() => Commands::Add {
+            message: cli.message,
+            title: None,
+        },
+        None => {
+            Cli::command().print_help()?;
+            return Ok(());
+        }
+    };
+
     let db_path = database_path()?;
     let conn = Connection::open(db_path)?;
     init_db(&conn)?;
 
-    match cli.command {
+    match command {
         Commands::Add { message, title } => {
             let body = message.join(" ");
             let title = title.unwrap_or_else(|| derive_title(&body));
