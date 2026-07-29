@@ -49,6 +49,31 @@ cn edit-title 1 "New title"
 cn delete 1
 ```
 
+## Piping
+
+`show`, `list` and `search` detect whether stdout is a terminal. In a terminal
+they print the usual decorated output; in a pipe they switch to raw output, so
+the result can be fed straight into other tools:
+
+```bash
+# Only the note body, no header lines
+cn show 1 | grep TODO
+
+# Tab-separated columns (id, created_at, title)
+cn list | cut -f3
+cn search Docker | awk -F'\t' '{ print $1 }'
+```
+
+Both flags override the detection:
+
+```bash
+# Force raw output, even in a terminal
+cn show 1 --raw
+
+# Keep headers and alignment, even in a pipe
+cn show 1 --no-raw | less
+```
+
 ## Editor
 
 `edit <id>` without a message opens the note in the editor from `$VISUAL`,

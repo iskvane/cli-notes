@@ -1,7 +1,8 @@
 use anyhow::{bail, Context, Result};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -35,16 +36,25 @@ enum Commands {
     },
 
     /// Alle Notizen auflisten
-    List,
+    List {
+        #[command(flatten)]
+        output: OutputArgs,
+    },
 
     /// Einzelne Notiz anzeigen
     Show {
         id: i64,
+
+        #[command(flatten)]
+        output: OutputArgs,
     },
 
     /// In Titel und Inhalt suchen
     Search {
         query: String,
+
+        #[command(flatten)]
+        output: OutputArgs,
     },
 
     /// Inhalt einer Notiz ersetzen; ohne Nachricht öffnet der konfigurierte Editor
@@ -69,6 +79,45 @@ enum Commands {
     Delete {
         id: i64,
     },
+}
+
+/// Steuert, ob die Ausgabe für Menschen oder für Pipes gedacht ist.
+#[derive(Args)]
+struct OutputArgs {
+    /// Nur die Nutzdaten ausgeben, ohne Kopfzeilen und Ausrichtung
+    #[arg(long)]
+    raw: bool,
+
+    /// Kopfzeilen erzwingen, auch in einer Pipe
+    #[arg(long, conflicts_with = "raw")]
+    no_raw: bool,
+}
+
+impl OutputArgs {
+    /// Ohne Flag entscheidet das Ziel der Ausgabe: Terminal schmückt, Pipe nicht.
+    fn raw(&self) -> bool {
+        resolve_raw(self.raw, self.no_raw, std::io::stdout().is_terminal())
+    }
+}
+
+/// Löst die beiden Flags gegen die Terminal-Erkennung auf.
+fn resolve_raw(raw: bool, no_raw: bool, stdout_is_terminal: bool) -> bool {
+    if raw {
+        true
+    } else if no_raw {
+        false
+    } else {
+        !stdout_is_terminal
+    }
+}
+
+/// Gibt eine Zeile der Notizliste aus; roh mit Tabs, sonst ausgerichtet.
+fn print_note_row(id: i64, created_at: &str, title: &str, raw: bool) {
+    if raw {
+        println!("{id}\t{created_at}\t{title}");
+    } else {
+        println!("{id:>4}  {created_at}  {title}");
+    }
 }
 
 /// Maximale Länge eines automatisch abgeleiteten Titels.
@@ -202,7 +251,9 @@ fn main() -> Result<()> {
             println!("Notiz gespeichert (ID: {}).", conn.last_insert_rowid());
         }
 
-        Commands::List => {
+        Commands::List { output } => {
+            let raw = output.raw();
+
             let mut stmt = conn.prepare(
                 r#"
                 SELECT id, title, created_at
@@ -221,11 +272,13 @@ fn main() -> Result<()> {
 
             for note in notes {
                 let (id, title, created_at) = note?;
-                println!("{id:>4}  {created_at}  {title}");
+                print_note_row(id, &created_at, &title, raw);
             }
         }
 
-        Commands::Show { id } => {
+        Commands::Show { id, output } => {
+            let raw = output.raw();
+
             let mut stmt = conn.prepare(
                 "SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ?1",
             )?;
@@ -242,10 +295,14 @@ fn main() -> Result<()> {
 
             match note {
                 Ok((id, title, body, created_at, updated_at)) => {
-                    println!("#{id}: {title}");
-                    println!("Erstellt: {created_at}");
-                    println!("Geändert: {updated_at}");
-                    println!("\n{body}");
+                    if !raw {
+                        println!("#{id}: {title}");
+                        println!("Erstellt: {created_at}");
+                        println!("Geändert: {updated_at}");
+                        println!();
+                    }
+
+                    println!("{body}");
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
                     eprintln!("Keine Notiz mit ID {id} gefunden.");
@@ -254,7 +311,8 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Search { query } => {
+        Commands::Search { query, output } => {
+            let raw = output.raw();
             let pattern = format!("%{query}%");
 
             let mut stmt = conn.prepare(
@@ -276,7 +334,7 @@ fn main() -> Result<()> {
 
             for note in notes {
                 let (id, title, created_at) = note?;
-                println!("{id:>4}  {created_at}  {title}");
+                print_note_row(id, &created_at, &title, raw);
             }
         }
 
@@ -378,5 +436,22 @@ mod tests {
     #[test]
     fn derive_title_handles_an_empty_body() {
         assert_eq!(derive_title(""), "");
+    }
+
+    #[test]
+    fn raw_defaults_to_the_output_target() {
+        assert!(resolve_raw(false, false, false));
+        assert!(!resolve_raw(false, false, true));
+    }
+
+    #[test]
+    fn raw_flags_beat_the_terminal_detection() {
+        assert!(resolve_raw(true, false, true));
+        assert!(!resolve_raw(false, true, false));
+    }
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
     }
 }
