@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -76,9 +76,7 @@ enum Commands {
     },
 
     /// Notiz löschen
-    Delete {
-        id: i64,
-    },
+    Delete { id: i64 },
 }
 
 /// Steuert, ob die Ausgabe für Menschen oder für Pipes gedacht ist.
@@ -158,9 +156,7 @@ fn edit_in_editor(initial: &str) -> Result<String> {
     let editor = configured_editor();
 
     let mut parts = editor.split_whitespace();
-    let program = parts
-        .next()
-        .context("Der konfigurierte Editor ist leer.")?;
+    let program = parts.next().context("Der konfigurierte Editor ist leer.")?;
 
     let path = std::env::temp_dir().join(format!("notes-{}.txt", std::process::id()));
     fs::write(&path, initial)?;
@@ -184,8 +180,7 @@ fn edit_in_editor(initial: &str) -> Result<String> {
 }
 
 fn database_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))?;
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))?;
 
     let data_dir = PathBuf::from(home).join(".notes");
     fs::create_dir_all(&data_dir)?;
